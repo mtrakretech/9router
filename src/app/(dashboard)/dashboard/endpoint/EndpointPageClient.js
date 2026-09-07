@@ -86,6 +86,18 @@ export default function APIPageClient({ machineId }) {
 
   const { copied, copy } = useCopyToClipboard();
 
+  const fetchTunnelStatus = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      const response = await fetch("/api/tunnel/status", { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(`Tunnel status HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   // Security gate: block remote exposure while dashboard uses default password or login is off.
   const isLoginUnsafe = !requireLogin || !hasPassword;
   const unsafeReason = !requireLogin
@@ -173,9 +185,7 @@ export default function APIPageClient({ machineId }) {
   // Trust user intent (settingsEnabled): UI stays "enabled" while watchdog restarts process
   const syncTunnelStatus = async () => {
     try {
-      const statusRes = await fetch("/api/tunnel/status", { cache: "no-store" });
-      if (!statusRes.ok) return;
-      const data = await statusRes.json();
+      const data = await fetchTunnelStatus();
       const tEnabled = data.tunnel?.settingsEnabled ?? data.tunnel?.enabled ?? false;
       const tUrl = data.tunnel?.tunnelUrl || "";
       setTunnelUrl(tUrl);
@@ -196,7 +206,9 @@ export default function APIPageClient({ machineId }) {
     try {
       const [settingsRes, statusRes] = await Promise.all([
         fetch("/api/settings"),
-        fetch("/api/tunnel/status", { cache: "no-store" })
+        fetchTunnelStatus()
+          .then((data) => ({ ok: true, json: async () => data }))
+          .catch(() => ({ ok: false }))
       ]);
       if (settingsRes.ok) {
         const data = await settingsRes.json();
@@ -222,6 +234,8 @@ export default function APIPageClient({ machineId }) {
       }
     } catch (error) {
       console.log("Error loading settings:", error);
+      setTunnelEnabled(false);
+      setTsEnabled(false);
     } finally {
       setTunnelChecking(false);
     }
